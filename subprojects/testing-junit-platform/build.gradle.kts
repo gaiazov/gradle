@@ -24,6 +24,8 @@ dependencies {
     implementation(project(":language-java"))
     implementation(project(":testing-base"))
     implementation(project(":testing-jvm"))
+    implementation(project(":logging"))
+    implementation(library("slf4j_api"))
 
     implementation(libs.junit)
     implementation(libs.junitPlatform)
