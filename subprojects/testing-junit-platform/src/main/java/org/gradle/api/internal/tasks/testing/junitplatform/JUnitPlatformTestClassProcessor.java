@@ -64,7 +64,7 @@ public class JUnitPlatformTestClassProcessor extends AbstractJUnitTestClassProce
     private CollectAllTestClassesExecutor testClassExecutor;
 
     public JUnitPlatformTestClassProcessor(JUnitPlatformSpec spec, IdGenerator<?> idGenerator, ActorFactory actorFactory, Clock clock) {
-        super(spec, idGenerator, actorFactory, clock);
+        super(spec, idGenerator, actorFactory, clock, false);
     }
 
     @Override

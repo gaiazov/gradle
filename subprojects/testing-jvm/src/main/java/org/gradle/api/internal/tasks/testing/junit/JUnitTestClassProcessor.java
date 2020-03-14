@@ -27,7 +27,7 @@ import org.gradle.internal.time.Clock;
 public class JUnitTestClassProcessor extends AbstractJUnitTestClassProcessor<JUnitSpec> {
 
     public JUnitTestClassProcessor(JUnitSpec spec, IdGenerator<?> idGenerator, ActorFactory actorFactory, Clock clock) {
-        super(spec, idGenerator, actorFactory, clock);
+        super(spec, idGenerator, actorFactory, clock, true);
     }
 
     @Override
