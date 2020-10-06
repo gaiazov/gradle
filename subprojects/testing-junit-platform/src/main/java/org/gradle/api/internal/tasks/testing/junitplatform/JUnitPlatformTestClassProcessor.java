@@ -20,6 +20,8 @@ import org.gradle.api.Action;
 import org.gradle.api.internal.tasks.testing.TestResultProcessor;
 import org.gradle.api.internal.tasks.testing.filter.TestSelectionMatcher;
 import org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestClassProcessor;
+import org.gradle.api.logging.Logger;
+import org.gradle.api.logging.Logging;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.actor.Actor;
 import org.gradle.internal.actor.ActorFactory;
@@ -29,6 +31,7 @@ import org.junit.platform.engine.DiscoverySelector;
 import org.junit.platform.engine.FilterResult;
 import org.junit.platform.engine.TestDescriptor;
 import org.junit.platform.engine.TestSource;
+import org.junit.platform.engine.discovery.ClassSelector;
 import org.junit.platform.engine.discovery.DiscoverySelectors;
 import org.junit.platform.engine.support.descriptor.ClassSource;
 import org.junit.platform.engine.support.descriptor.MethodSource;
@@ -40,7 +43,11 @@ import org.junit.platform.launcher.core.LauncherFactory;
 
 import javax.annotation.Nonnull;
 import java.lang.reflect.Modifier;
+import java.nio.ByteBuffer;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -52,10 +59,12 @@ import static org.junit.platform.launcher.TagFilter.excludeTags;
 import static org.junit.platform.launcher.TagFilter.includeTags;
 
 public class JUnitPlatformTestClassProcessor extends AbstractJUnitTestClassProcessor<JUnitPlatformSpec> {
+    private static final Logger LOG = Logging.getLogger(JUnitPlatformTestClassProcessor.class);
+
     private CollectAllTestClassesExecutor testClassExecutor;
 
     public JUnitPlatformTestClassProcessor(JUnitPlatformSpec spec, IdGenerator<?> idGenerator, ActorFactory actorFactory, Clock clock) {
-        super(spec, idGenerator, actorFactory, clock);
+        super(spec, idGenerator, actorFactory, clock, false);
     }
 
     @Override
@@ -116,7 +125,10 @@ public class JUnitPlatformTestClassProcessor extends AbstractJUnitTestClassProce
     private LauncherDiscoveryRequest createLauncherDiscoveryRequest(List<Class<?>> testClasses) {
         List<DiscoverySelector> classSelectors = testClasses.stream()
             .map(DiscoverySelectors::selectClass)
+            .sorted(Comparator.comparing(ClassSelector::getClassName, Comparator.naturalOrder()))
             .collect(Collectors.toList());
+
+        randomizeTestClasses(classSelectors);
 
         LauncherDiscoveryRequestBuilder requestBuilder = LauncherDiscoveryRequestBuilder.request().selectors(classSelectors);
 
@@ -125,6 +137,32 @@ public class JUnitPlatformTestClassProcessor extends AbstractJUnitTestClassProce
         addTagsFilter(requestBuilder);
 
         return requestBuilder.build();
+    }
+
+    private void randomizeTestClasses(List<DiscoverySelector> classSelectors) {
+        SecureRandom random = new SecureRandom();
+        long seed = getEnvironmentSeed(random);
+        LOG.warn("Reordering tests with seed = {}", seed);
+        random.setSeed(seed);
+        Collections.shuffle(classSelectors, random);
+    }
+
+    private long getEnvironmentSeed(SecureRandom random) {
+        String junitSeed = System.getenv("JUNIT_SEED");
+        if (junitSeed != null) {
+            try {
+                long seed = Long.parseLong(junitSeed);
+                LOG.info("Using seed='{}' from JUNIT_SEED environment variable", seed);
+                return seed;
+            } catch (NumberFormatException e) {
+                LOG.error("Could not parse JUNIT_SEED environment variable '" + junitSeed + "' as number", e);
+            }
+        }
+        return generateSeed(random);
+    }
+
+    private long generateSeed(SecureRandom random) {
+        return ByteBuffer.wrap(random.generateSeed(Long.BYTES)).getLong();
     }
 
     private void addEnginesFilter(LauncherDiscoveryRequestBuilder requestBuilder) {

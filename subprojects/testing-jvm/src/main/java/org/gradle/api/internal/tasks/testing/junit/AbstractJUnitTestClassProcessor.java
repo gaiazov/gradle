@@ -27,6 +27,14 @@ import org.gradle.internal.time.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Random;
+
 public abstract class AbstractJUnitTestClassProcessor<T extends AbstractJUnitSpec> implements TestClassProcessor {
     private static final Logger LOGGER = LoggerFactory.getLogger(AbstractJUnitTestClassProcessor.class);
 
@@ -34,14 +42,18 @@ public abstract class AbstractJUnitTestClassProcessor<T extends AbstractJUnitSpe
     protected final IdGenerator<?> idGenerator;
     protected final Clock clock;
     private final ActorFactory actorFactory;
+    private final List<TestClassRunInfo> testClasses;
+    private final boolean reorderTests;
     private Actor resultProcessorActor;
     private Action<String> executor;
 
-    public AbstractJUnitTestClassProcessor(T spec, IdGenerator<?> idGenerator, ActorFactory actorFactory, Clock clock) {
+    public AbstractJUnitTestClassProcessor(T spec, IdGenerator<?> idGenerator, ActorFactory actorFactory, Clock clock, boolean reorderTests) {
         this.idGenerator = idGenerator;
         this.spec = spec;
         this.actorFactory = actorFactory;
         this.clock = clock;
+        this.testClasses = new ArrayList<TestClassRunInfo>();
+        this.reorderTests = reorderTests;
     }
 
     @Override
@@ -58,13 +70,59 @@ public abstract class AbstractJUnitTestClassProcessor<T extends AbstractJUnitSpe
 
     @Override
     public void processTestClass(TestClassRunInfo testClass) {
-        LOGGER.debug("Executing test class {}", testClass.getTestClassName());
-        executor.execute(testClass.getTestClassName());
+        if (reorderTests) {
+            testClasses.add(testClass);
+        } else {
+            LOGGER.debug("Executing test class {}", testClass.getTestClassName());
+            executor.execute(testClass.getTestClassName());
+        }
     }
 
     @Override
     public void stop() {
+        if (reorderTests) {
+            for (TestClassRunInfo testClass : randomizeTestClasses(testClasses)) {
+                LOGGER.debug("Executing test class {}", testClass.getTestClassName());
+                executor.execute(testClass.getTestClassName());
+            }
+        }
         resultProcessorActor.stop();
+    }
+
+    private List<TestClassRunInfo> randomizeTestClasses(List<TestClassRunInfo> classSelectors) {
+        List<TestClassRunInfo> sortedClassSelector = new ArrayList<TestClassRunInfo>(classSelectors);
+        Collections.sort(sortedClassSelector, new Comparator<TestClassRunInfo>() {
+            @Override
+            public int compare(TestClassRunInfo o1, TestClassRunInfo o2) {
+                return o1.getTestClassName().compareTo(o2.getTestClassName());
+            }
+        });
+
+        long seed = getEnvironmentSeed();
+        LOGGER.warn("Reordering tests with seed = {}", seed);
+        // I tried using SecureRandom here but it was not deterministic? Not sure why!
+        Random random = new Random(seed);
+        Collections.shuffle(sortedClassSelector, random);
+
+        return sortedClassSelector;
+    }
+
+    private long getEnvironmentSeed() {
+        String junitSeed = System.getenv("JUNIT_SEED");
+        if (junitSeed != null) {
+            LOGGER.warn("Found seed {} from variable JUNIT_SEED", junitSeed);
+            try {
+                return Long.parseLong(junitSeed);
+            } catch (NumberFormatException e) {
+                LOGGER.error("Could not parse JUNIT_SEED environment variable '" + junitSeed + "' as number", e);
+            }
+        }
+        LOGGER.warn("Generating new seed");
+        return generateSeed();
+    }
+
+    private long generateSeed() {
+        return ByteBuffer.wrap(new SecureRandom().generateSeed(8)).getLong();
     }
 
     @Override
